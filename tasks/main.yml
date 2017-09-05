@@ -1,0 +1,111 @@
+---
+- name: Installing needed software
+  pacman:
+      name: "{{ item }}"
+      state: present
+  with_items:
+      - mongodb
+      - java-runtime-headless
+      - fontconfig
+
+- name: Creating system user unifi
+  user:
+      name: unifi
+      state: present
+
+- name: Creating temporary directory
+  file:
+      path: "{{ unifi_temp_path }}"
+      state: directory
+
+- name: Downloading Debian package from Ubiquiti
+  get_url:
+      url: "http://dl.ubnt.com/unifi/{{ unifi_version }}/unifi_sysvinit_all.deb"
+      dest: "{{ unifi_temp_path }}/unifi.deb"
+
+- name: Extracting package
+  shell: "chdir={{ unifi_temp_path }} ar -x unifi.deb"
+  changed_when: false
+
+- name: Extracting data.tar.xz
+  shell: "chdir={{ unifi_temp_path }} tar xf data.tar.xz"
+  args:
+      warn: no
+  changed_when: false
+
+- name: Copying systemd unit file
+  template:
+      src: systemd-unit-file.j2
+      dest: /etc/systemd/system/unifi.service
+      owner: root
+      group: root
+
+- name: Copying UniFi files
+  shell: "rsync -ar {{ unifi_temp_path }}/usr/lib/* /usr/lib/"
+  changed_when: false
+
+- name: Setting permissions
+  file:
+      path: /usr/lib/unifi
+      owner: unifi
+      group: unifi
+      state: directory
+      recurse: true
+
+- name: Linking mongod
+  file:
+      src: /usr/bin/mongod
+      dest: /usr/lib/unifi/bin/mongod
+      state: link
+
+- block:
+
+    # Fiddle up a keystore
+    # Based on my blog post (in german): https://blog.veloc1ty.de/2017/01/03/unifi-controller-tls-zertifikat-tauschen/
+
+    - name: Install OpenSSL
+      pacman:
+          name: openssl
+          state: present
+
+    - name: Uploading keystore files
+      copy:
+          src: "{{ item }}"
+          dest: "{{ unifi_temp_path }}/{{ item | basename }}"
+      with_items:
+          - "{{ unifi_keystore_private_key }}"
+          - "{{ unifi_keystore_cert }}"
+          - "{{ unifi_keystore_ca }}"
+      notify:
+          - Restart UniFi
+
+    - name: Creating PKCS12 file
+      shell: "openssl pkcs12 -export -in {{ unifi_temp_path }}/{{ unifi_keystore_cert | basename }} -inkey {{ unifi_temp_path }}/{{ unifi_keystore_private_key | basename }} -CAfile {{ unifi_temp_path }}/{{ unifi_keystore_ca | basename }} -caname root -out {{ unifi_temp_path }}/wlancontroller.p12 -name unifi -password pass:aircontrolenterprise"
+      changed_when: false
+
+    - name: Converting PKCS12 file to Java Keystore
+      shell: "keytool -importkeystore -deststorepass aircontrolenterprise -destkeypass aircontrolenterprise -destkeystore {{ unifi_temp_path }}/keystore -srckeystore {{ unifi_temp_path }}/wlancontroller.p12 -srcstoretype PKCS12 -srcstorepass aircontrolenterprise -alias unifi"
+      changed_when: false
+
+    - name: Copying keystore to correct location
+      copy:
+          src: "{{ unifi_temp_path }}/keystore"
+          dest: /usr/lib/unifi/data
+          remote_src: true
+      notify:
+          - Restart UniFi
+
+  when: unifi_generate_keystore == false
+
+- name: Clean up temp directory
+  file:
+      path: "{{ unifi_temp_path }}"
+      state: absent
+
+- name: Start unifi
+  systemd:
+      name: unifi
+      state: started
+      enabled: true
+      masked: false
+      daemon_reload: true

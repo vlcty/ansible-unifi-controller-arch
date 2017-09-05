@@ -1,0 +1,8 @@
+---
+unifi_version: 5.5.20
+unifi_temp_path: /usr/share/unifi-temp
+
+unifi_generate_keystore: false
+unifi_keystore_private_key: private.pem
+unifi_keystore_cert: public.pem
+unifi_keystore_ca: ca.pem
