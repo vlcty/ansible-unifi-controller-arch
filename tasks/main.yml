@@ -1,12 +1,27 @@
 ---
-- name: Installing needed software
-  pacman:
-      name: "{{ item }}"
+# - name: Installing needed software
+#   pacman:
+#       name: "{{ item }}"
+#       state: present
+#   with_items:
+#       - mongodb
+#       - java-runtime-headless
+#       - fontconfig
+#       - binutils
+#       - rsync
+
+- name: Redirect traffic from 443 to 8443
+  iptables:
+      table: nat
+      chain: PREROUTING
+      in_interface: ens3
+      protocol: tcp
+      match: tcp
+      destination_port: 443
+      jump: REDIRECT
+      to_ports: 8443
+      comment: Redirect traffic from 443 to 8443
       state: present
-  with_items:
-      - mongodb
-      - java-runtime-headless
-      - fontconfig
 
 - name: Creating system user unifi
   user:
@@ -95,7 +110,7 @@
       notify:
           - Restart UniFi
 
-  when: unifi_generate_keystore == false
+  when: unifi_generate_keystore == true
 
 - name: Clean up temp directory
   file:

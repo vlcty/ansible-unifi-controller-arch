@@ -2,4 +2,4 @@
 - name: Restart UniFi
   systemd:
       name: unifi
-      state: restart
+      state: restarted
